@@ -122,11 +122,11 @@ function updateSchedules() {
       rules.map(rule => {
         const r = getRuleResource(queueArn, roleArn, prefix, rule);
         const ref = _.camelCase(r["Properties"]["Name"]);
+        this.serverless.cli.log(`SWS schedule created: [${rule.expression}] ${rule.desc}`);
         resources[ref] = r;
         return r;
       });
       _.merge(this.serverless.service.provider.compiledCloudFormationTemplate.Resources, resources);
-      console.log(this.serverless.service.provider.compiledCloudFormationTemplate.Resources);
     });
 }
 
@@ -147,7 +147,6 @@ class ServerlessPlugin {
     this.servicePath = this.serverless.config.servicePath;
 
     const before = () => {
-      console.log(this.serverless.service.provider.compiledCloudFormationTemplate.Resources);
       return BbPromise.bind(this)
         .then(updateSchedules)
     };

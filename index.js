@@ -4,7 +4,7 @@ const BbPromise = require('bluebird');
 const _ = require('lodash');
 const md5 = require('md5');
 
-function getRuleRolePolicyResource(queueArn, roleRef) {
+function getSQSRuleRolePolicyResource(queueArn, roleRef) {
   return {
     "Type": "AWS::IAM::Policy",
     "Properties": {
@@ -24,7 +24,7 @@ function getRuleRolePolicyResource(queueArn, roleRef) {
   }
 }
 
-function getRuleRoleResource(roleName, tags) {
+function getSQSRuleRoleResource(roleName, tags) {
   return {
     "Type": "AWS::IAM::Role",
     "Properties": {
@@ -44,7 +44,8 @@ function getRuleRoleResource(roleName, tags) {
   };
 }
 
-function getRuleResource(queueArn, roleArn, prefix, rule) {
+// noinspection Duplicates
+function getSQSRuleResource(queueArn, roleArn, prefix, rule) {
   const funcPath = _.get(rule, 'func', null);
   const funcArgs = _.get(rule, 'func_args', []);
   const funcKwargs = _.get(rule, 'func_kwargs', {});
@@ -94,6 +95,54 @@ function getRuleResource(queueArn, roleArn, prefix, rule) {
   };
 }
 
+// noinspection Duplicates
+function getLambdaRuleResource(funcArn, prefix, rule) {
+  const funcPath = _.get(rule, 'func', null);
+  const funcArgs = _.get(rule, 'func_args', []);
+  const funcKwargs = _.get(rule, 'func_kwargs', {});
+  const expression = _.get(rule, 'expression', null);
+  const isEnabled = _.get(rule, 'enabled', true);
+  if (!funcPath || !expression) {
+    return
+  }
+  const payload = {
+    'task_path': funcPath,
+    'args': funcArgs,
+    'kwargs': funcKwargs,
+  };
+  const payloadId = md5(JSON.stringify(Object.assign({expression: expression}, payload)));
+  const name = _.isEmpty(prefix) ? payloadId : `${prefix}-${payloadId}`;
+  const groupId = md5(name);
+  const task = JSON.stringify(
+    Object.assign(
+      {
+        '__integration': 'eb_lambda_scheduled',
+        '__sws_version': 'v3',
+        '__sws_worker': 'lambda',
+      },
+      payload
+    )
+  );
+  const lambdaTarget = {
+    'Id': `${groupId}-lambda`,
+    'Arn': funcArn,
+    'Input': task
+  };
+  return {
+    "Type": "AWS::Events::Rule",
+    "Properties": {
+      "Description": _.get(rule, 'desc', ''),
+      "Name": name,
+      "ScheduleExpression": expression,
+      "State": isEnabled ? 'ENABLED' : 'DISABLED',
+      "Targets": [
+        lambdaTarget
+      ]
+    }
+  };
+}
+
+
 function updateSchedules() {
   const stage = _.get(
     this.serverless,
@@ -106,27 +155,44 @@ function updateSchedules() {
     )
     .map((s, index) => {
       const queueArn = _.get(s, 'queueArn', null);
+      const funcArn = _.get(s, 'funcArn', null);
       const tags = _.get(s, 'tags', []);
       const prefix = _.get(s, 'prefix', `${this.serverless.service.service}-${stage}-sws-schedule-${index}`);
-      const roleName = `${prefix}-role`;
-      const roleRef = _.camelCase(roleName);
-      const roleArn = { 'Fn::GetAtt': [ roleRef, 'Arn' ] };
-      const roleResource = getRuleRoleResource(roleName, tags);
-      const policyName = `${prefix}-role-policy`;
-      const policyRef = _.camelCase(policyName);
-      const policyResource = getRuleRolePolicyResource(queueArn, roleRef);
       const rules = s.rules;
-      const resources = {};
-      resources[roleRef] = roleResource;
-      resources[policyRef] = policyResource;
-      rules.map(rule => {
-        const r = getRuleResource(queueArn, roleArn, prefix, rule);
-        const ref = _.camelCase(r["Properties"]["Name"]);
-        this.serverless.cli.log(`SWS schedule created: [${rule.expression}] ${rule.desc}`);
-        resources[ref] = r;
-        return r;
-      });
-      _.merge(this.serverless.service.provider.compiledCloudFormationTemplate.Resources, resources);
+
+      if (!_.isEmpty(queueArn)) {
+        const resources = {};
+        const roleName = `${prefix}-role`;
+        const roleRef = _.camelCase(roleName);
+        const roleArn = { 'Fn::GetAtt': [ roleRef, 'Arn' ] };
+        const roleResource = getSQSRuleRoleResource(roleName, tags);
+        const policyName = `${prefix}-role-policy`;
+        const policyRef = _.camelCase(policyName);
+        const policyResource = getSQSRuleRolePolicyResource(queueArn, roleRef);
+        resources[roleRef] = roleResource;
+        resources[policyRef] = policyResource;
+        rules.map(rule => {
+          const r = getSQSRuleResource(queueArn, roleArn, prefix, rule);
+          const ref = _.camelCase(r["Properties"]["Name"]);
+          this.serverless.cli.log(`SWS schedule created: [${rule.expression}] ${rule.desc}`);
+          resources[ref] = r;
+          return r;
+        });
+        _.merge(this.serverless.service.provider.compiledCloudFormationTemplate.Resources, resources);
+        return;
+      }
+
+      if (!_.isEmpty(funcArn)) {
+        const resources = {};
+        rules.map(rule => {
+          const r = getLambdaRuleResource(funcArn, prefix, rule);
+          const ref = _.camelCase(r["Properties"]["Name"]);
+          this.serverless.cli.log(`SWS schedule created: [${rule.expression}] ${rule.desc}`);
+          resources[ref] = r;
+          return r;
+        });
+        _.merge(this.serverless.service.provider.compiledCloudFormationTemplate.Resources, resources);
+      }
     });
 }
 

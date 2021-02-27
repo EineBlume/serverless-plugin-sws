@@ -142,7 +142,6 @@ function getLambdaRuleResource(funcArn, prefix, rule) {
   };
 }
 
-
 function updateSchedules() {
   const stage = _.get(
     this.serverless,
@@ -151,16 +150,27 @@ function updateSchedules() {
   );
   this.options.schedules
     .filter(s =>
-      !_.isEmpty(_.get(s, 'queueArn', '')) && !_.isEmpty(_.get(s, 'rules', []))
+      !_.isEmpty(_.get(s, 'rules', []))
     )
     .map((s, index) => {
+      this.serverless.cli.log(`SWS schedule data: ${s}`);
       const queueArn = _.get(s, 'queueArn', null);
       const funcArn = _.get(s, 'funcArn', null);
       const tags = _.get(s, 'tags', []);
       const prefix = _.get(s, 'prefix', `${this.serverless.service.service}-${stage}-sws-schedule-${index}`);
       const rules = s.rules;
 
-      if (!_.isEmpty(queueArn)) {
+      if (!_.isEmpty(funcArn)) {
+        const resources = {};
+        rules.map(rule => {
+          const r = getLambdaRuleResource(funcArn, prefix, rule);
+          const ref = _.camelCase(r["Properties"]["Name"]);
+          this.serverless.cli.log(`SWS schedule created: [${rule.expression}] ${rule.desc}`);
+          resources[ref] = r;
+          return r;
+        });
+        _.merge(this.serverless.service.provider.compiledCloudFormationTemplate.Resources, resources);
+      } else if (!_.isEmpty(queueArn)) {
         const resources = {};
         const roleName = `${prefix}-role`;
         const roleRef = _.camelCase(roleName);
@@ -173,19 +183,6 @@ function updateSchedules() {
         resources[policyRef] = policyResource;
         rules.map(rule => {
           const r = getSQSRuleResource(queueArn, roleArn, prefix, rule);
-          const ref = _.camelCase(r["Properties"]["Name"]);
-          this.serverless.cli.log(`SWS schedule created: [${rule.expression}] ${rule.desc}`);
-          resources[ref] = r;
-          return r;
-        });
-        _.merge(this.serverless.service.provider.compiledCloudFormationTemplate.Resources, resources);
-        return;
-      }
-
-      if (!_.isEmpty(funcArn)) {
-        const resources = {};
-        rules.map(rule => {
-          const r = getLambdaRuleResource(funcArn, prefix, rule);
           const ref = _.camelCase(r["Properties"]["Name"]);
           this.serverless.cli.log(`SWS schedule created: [${rule.expression}] ${rule.desc}`);
           resources[ref] = r;

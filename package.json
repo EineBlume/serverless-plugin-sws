@@ -1,6 +1,6 @@
 {
   "name": "serverless-plugin-sws",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "description": "Serverless plugin to schedule sws tasks.",
   "author": "Eineblume",
   "license": "MIT",

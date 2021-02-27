@@ -113,16 +113,21 @@ function getLambdaRuleResource(funcArn, prefix, rule) {
   const payloadId = md5(JSON.stringify(Object.assign({expression: expression}, payload)));
   const name = _.isEmpty(prefix) ? payloadId : `${prefix}-${payloadId}`;
   const groupId = md5(name);
-  const task = JSON.stringify(
-    Object.assign(
+  const task = JSON.stringify({
+    Records: [
       {
-        '__integration': 'eb_lambda_scheduled',
-        '__sws_version': 'v3',
-        '__sws_worker': 'lambda',
-      },
-      payload
-    )
-  );
+        'eventSource': 'aws:events',
+        'message': Object.assign(
+          {
+            '__integration': 'eb_lambda_scheduled',
+            '__sws_version': 'v3',
+            '__sws_worker': 'lambda',
+          },
+          payload
+        )
+      }
+    ]
+  });
   const lambdaTarget = {
     'Id': `${groupId}-lambda`,
     'Arn': funcArn,
@@ -153,7 +158,6 @@ function updateSchedules() {
       !_.isEmpty(_.get(s, 'rules', []))
     )
     .map((s, index) => {
-      this.serverless.cli.log(`SWS schedule data: ${s}`);
       const queueArn = _.get(s, 'queueArn', null);
       const funcArn = _.get(s, 'funcArn', null);
       const tags = _.get(s, 'tags', []);
